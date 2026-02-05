@@ -7,37 +7,85 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
-#define STACKSIZE 1024
-#define THREAD0_PRIORITY 5
-#define THREAD1_PRIORITY 5
+//  Define thread priorities
+#define THREAD0_PRIORITY                     5
+#define THREAD1_PRIORITY                     6
+#define WORK_Q_PRIORITY                      7
+
+// Define stack size used by each thread
+#define THREAD0_STACKSIZE                    512
+#define THREAD1_STACKSIZE                    512
+#define WORQ_THREAD_STACK_SIZE               512
+
+
+// Define stack area used by workqueue thread
+static K_THREAD_STACK_DEFINE(my_stack_area, WORQ_THREAD_STACK_SIZE);
+
+// Define queue structure
+static struct k_work_q offload_work_q = {0};
+
+struct work_info {
+    struct k_work work;
+    char name[25];
+} my_work;
+
+// Some non-urgennt work to be done
+static inline void emulate_work()
+{
+	for(volatile int count_out = 0; count_out < 300000; count_out ++);
+}
+
+// Handler function for the work item
+void offload_function(struct k_work *work_term)
+{
+	emulate_work();
+}
+
 
 void thread0(void)
 {
-	while (1)
-      {
-      printk("Hello World from Thread 0! %d\n", k_cycle_get_32());
-      // Yield the CPU to allow other threads to run, but keeps current thread ready to run
-      // k_yield();
-      // Sleep for 100 milliseconds, putting the thread to sleep and allowing other threads to run
-      // k_msleep(100);
-      // Busy wait for 100 milliseconds, keeping the thread active but consuming CPU cycles
-      k_busy_wait(100000);
+	uint64_t time_stamp;
+	int64_t delta_time;
+	/* Initialize the work item and connect it to its handler function */
+   k_work_queue_start(&offload_work_q, my_stack_area,
+                   K_THREAD_STACK_SIZEOF(my_stack_area), WORK_Q_PRIORITY,
+                   NULL);
 
+   strcpy(my_work.name, "Thread0 emulate_work()");
+
+   k_work_init(&my_work.work, offload_function);
+
+	while (1) {
+		time_stamp = k_uptime_get();
+		// Submit the work item to the workqueue instead of calling emulate_work() directly
+		// emulate_work();
+		k_work_submit_to_queue(&offload_work_q, &my_work.work);
+		delta_time = k_uptime_delta(&time_stamp);
+		printk("thread0 yielding this round in %lld ms\n", delta_time);
+		k_msleep(20);
 	}
 }
 
 void thread1(void)
 {
-   while (1)
-   {
-      printk("Hello World from Thread 1! %d\n", k_cycle_get_32());
-      // k_yield();
-      // k_msleep(100);
-      k_busy_wait(100000);
+	uint64_t time_stamp;
+	int64_t delta_time;
+	/* STEP 8 - Start the workqueue, */
+	/* initialize the work item and connect it to its handler function */
+
+	while (1) {
+		time_stamp = k_uptime_get();
+		/* STEP 9 - Submit the work item to the workqueue instead of calling emulate_work()
+		 * directly */
+		/* Remember to comment out emulate_work(); */
+		emulate_work();
+		delta_time = k_uptime_delta(&time_stamp);
+		printk("thread1 yielding this round in %lld ms\n", delta_time);
+		k_msleep(20);
 	}
 }
 
-K_THREAD_DEFINE(thread0_id, STACKSIZE, thread0, NULL, NULL, NULL,
+K_THREAD_DEFINE(thread0_id, THREAD0_STACKSIZE, thread0, NULL, NULL, NULL,
    THREAD0_PRIORITY, 0, 0);
-K_THREAD_DEFINE(thread1_id, STACKSIZE, thread1, NULL, NULL, NULL,
+K_THREAD_DEFINE(thread1_id, THREAD1_STACKSIZE, thread1, NULL, NULL, NULL,
    THREAD1_PRIORITY, 0, 0);
